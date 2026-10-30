@@ -1,0 +1,57 @@
+# Ambiente local completo (app + banco + worker) usando o Dockerfile do projeto.
+#
+#   docker compose -f compose.amn.yaml up -d --build
+#   docker compose -f compose.amn.yaml exec app php bin/console novosga:install
+#
+# A app fica em http://localhost:8090 (portas mudam com APP_PORT / DB_PORT)
+
+x-app-env: &app-env
+  APP_SECRET: ${APP_SECRET:-troque-este-segredo-local}
+  APP_LANGUAGE: ${APP_LANGUAGE:-pt_BR}
+  TZ: ${TZ:-America/Sao_Paulo}
+  DATABASE_URL: postgresql://novosga:novosga@database:5432/novosga?serverVersion=16&charset=utf8
+  MESSENGER_TRANSPORT_DSN: doctrine://default?auto_setup=0
+  MAILER_DSN: null://null
+  # O hub Mercure roda embutido no FrankenPHP (etc/Caddyfile); as duas chaves precisam ser iguais
+  MERCURE_JWT_SECRET: &mercure-key ${MERCURE_JWT_SECRET:-!ChangeThisMercureHubJWTSecretKey!}
+  MERCURE_PUBLISHER_JWT_KEY: *mercure-key
+  OAUTH_ENCRYPTION_KEY: ${OAUTH_ENCRYPTION_KEY:-troque-esta-chave-oauth-local}
+
+services:
+  app:
+    build: .
+    image: amn/novosga:local
+    environment: *app-env
+    ports:
+      - "${APP_PORT:-8090}:8080"
+    depends_on:
+      database:
+        condition: service_healthy
+
+  worker:
+    image: amn/novosga:local
+    command: sh etc/consumer.sh async
+    environment: *app-env
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+
+  database:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: novosga
+      POSTGRES_USER: novosga
+      POSTGRES_PASSWORD: novosga
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-d", "novosga", "-U", "novosga"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - novosga_db:/var/lib/postgresql/data
+
+volumes:
+  novosga_db:
